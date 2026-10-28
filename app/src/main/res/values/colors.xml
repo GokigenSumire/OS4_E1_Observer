@@ -1,0 +1,14 @@
+<resources>
+    <color name="dashboard_background">#F4F6F8</color>
+    <color name="dashboard_surface">#FFFFFF</color>
+    <color name="dashboard_text">#18242E</color>
+    <color name="dashboard_secondary">#5D6C79</color>
+    <color name="dashboard_outline">#DFE5EA</color>
+    <color name="dashboard_accent">#176A4C</color>
+    <color name="dashboard_accent_text">#FFFFFF</color>
+    <color name="dashboard_positive_surface">#E7F4ED</color>
+    <color name="dashboard_positive_text">#185A40</color>
+    <color name="dashboard_warning_surface">#FFF2D9</color>
+    <color name="dashboard_warning_text">#795517</color>
+    <color name="dashboard_ripple">#22176A4C</color>
+</resources>

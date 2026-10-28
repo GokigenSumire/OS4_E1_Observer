@@ -1,0 +1,26 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <queries>
+        <package android:name="personal.wallpaper.os3" />
+        <package android:name="personal.wallpaper.os3.debug" />
+    </queries>
+    <permission android:name="${applicationId}.CONTROL" android:protectionLevel="signature" />
+    <uses-permission android:name="${applicationId}.CONTROL" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <application android:label="Hyper Wallpaper 兼容" android:icon="@drawable/ic_home_compat" android:roundIcon="@drawable/ic_home_compat" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:allowBackup="false" android:dataExtractionRules="@xml/data_extraction_rules" android:supportsRtl="true">
+        <service android:name=".relay.LockRelayService" android:exported="true" />
+        <meta-data android:name="xposedmodule" android:value="true" />
+        <meta-data android:name="xposeddescription" android:value="按需桌面与锁屏手势兼容，分别永久开关；仅项目壁纸和正常系统认证；需要系统框架及SystemUI作用域，不写系统字段" />
+        <meta-data android:name="xposedminversion" android:value="82" />
+        <meta-data android:name="xposedscope" android:resource="@array/xposed_scope" />
+        <activity android:name=".LockDebugActivity" android:exported="false" />
+        <activity android:name=".MainActivity" android:exported="true">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity>
+        <receiver android:name=".CompatStartupReceiver" android:exported="false" android:directBootAware="true">
+            <intent-filter>
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

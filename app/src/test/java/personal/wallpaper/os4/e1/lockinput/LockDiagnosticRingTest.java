@@ -1,0 +1,27 @@
+package personal.wallpaper.os4.e1.lockinput;
+import org.junit.Test;
+import static org.junit.Assert.*;
+public final class LockDiagnosticRingTest {
+    private int input(){return LockDiagnosticCause.code("UNKNOWN_mShowing");}
+    @Test public void firstEventRecordsWithoutTenSecondDelay(){LockDiagnosticRing r=new LockDiagnosticRing();String t=r.start(10).token;assertTrue(r.record(t,10,0,input(),1));assertEquals(1,r.state(10).rows);}
+    @Test public void stopFreezesRowsRevisionAndReason(){LockDiagnosticRing r=new LockDiagnosticRing();String t=r.start(0).token;r.record(t,1,0,input(),1);LockDiagnosticRing.State frozen=r.stop(t,2);assertFalse(r.record(t,3,0,input(),2));assertEquals(frozen.revision,r.state(100).revision);assertEquals(2,r.state(100).reason);}
+    @Test public void activePageCannotBeExported(){LockDiagnosticRing r=new LockDiagnosticRing();String t=r.start(0).token;try{r.page(t,1,0,0);fail();}catch(IllegalArgumentException expected){}}
+    @Test public void staleSessionCannotReadNewSnapshot(){LockDiagnosticRing r=new LockDiagnosticRing();String old=r.start(0).token;r.stop(old,1);String next=r.start(2).token;r.stop(next,3);try{r.page(old,r.state(4).revision,0,4);fail();}catch(IllegalArgumentException expected){}}
+    @Test public void wrongRevisionRejected(){LockDiagnosticRing r=new LockDiagnosticRing();String t=r.start(0).token;r.stop(t,1);try{r.page(t,0,0,2);fail();}catch(IllegalArgumentException expected){}}
+    @Test public void timeoutIsBoundedWithoutAnotherTouch(){LockDiagnosticRing r=new LockDiagnosticRing();r.start(0);LockDiagnosticRing.State s=r.state(200000);assertFalse(s.active);assertEquals(3,s.reason);}
+    @Test public void repeatedActiveStartDoesNotExtendWindow(){LockDiagnosticRing r=new LockDiagnosticRing();String t=r.start(0).token;assertEquals(t,r.start(199999).token);assertFalse(r.state(200000).active);}
+    @Test public void rowLimitStopsWithoutDroppingCommittedRows(){LockDiagnosticRing r=new LockDiagnosticRing(2,1000,200000);String t=r.start(0).token;r.record(t,0,0,input(),1);r.record(t,1,0,input(),2);assertEquals(4,r.state(1).reason);assertEquals(2,r.page(t,r.state(1).revision,0,1).size());}
+    @Test public void byteLimitStopsBeforeOverflow(){LockDiagnosticRing r=new LockDiagnosticRing(2000,80,200000);String t=r.start(0).token;r.record(t,0,0,input(),1);r.record(t,1,0,input(),2);assertEquals(5,r.state(1).reason);assertTrue(r.state(1).bytes<=80);}
+    @Test public void illegalCauseAndStageCannotAddContent(){LockDiagnosticRing r=new LockDiagnosticRing();String t=r.start(0).token;assertFalse(r.record(t,0,99,input(),1));assertFalse(r.record(t,0,0,Integer.MAX_VALUE,1));assertFalse(r.record(t,0,1,input(),1));assertEquals(0,r.state(0).rows);}
+    @Test public void negativeCountsRejected(){LockDiagnosticRing r=new LockDiagnosticRing();String t=r.start(0).token;assertFalse(r.record(t,0,0,input(),-1));}
+    @Test public void pageIsImmutableAndSequenceStable(){LockDiagnosticRing r=new LockDiagnosticRing();String t=r.start(0).token;r.record(t,0,0,input(),1);LockDiagnosticRing.State s=r.stop(t,1);var rows=r.page(t,s.revision,0,1);assertTrue(rows.get(0).startsWith("row=1 stage=INPUT cause=UNKNOWN_mShowing total=1"));try{rows.clear();fail();}catch(UnsupportedOperationException expected){}}
+    @Test public void bytesIncludeOneLfPerRow(){LockDiagnosticRing r=new LockDiagnosticRing();String t=r.start(0).token;r.record(t,0,0,input(),1);LockDiagnosticRing.State s=r.stop(t,1);assertEquals(r.page(t,s.revision,0,1).get(0).length()+1,s.bytes);}
+    @Test public void unknownNamesNeverEnterExport(){assertEquals(0,LockDiagnosticCause.code("content://private/password"));assertEquals("UNKNOWN_STATE",LockDiagnosticCause.label(-1));}
+    @Test public void labelsAreAsciiAndNoPaths(){for(int i=0;LockDiagnosticCause.valid(i);i++)assertTrue(LockDiagnosticCause.label(i).matches("[A-Za-z0-9_= .:-]+"));}
+    @Test public void roleThreeOnlyReportsAndQueries(){for(int i=1;i<=10;i++)assertFalse(LockDiagnosticRolePolicy.allows(3,i));assertTrue(LockDiagnosticRolePolicy.allows(3,11));assertTrue(LockDiagnosticRolePolicy.allows(3,12));}
+    @Test public void roleThreeCannotBecomeModuleOrUnknownRole(){assertFalse(LockDiagnosticRolePolicy.allows(99,7));assertFalse(LockDiagnosticRolePolicy.allows(2,7));assertTrue(LockDiagnosticRolePolicy.allows(1,7));}
+    @Test public void revokeStopsOnlyDiagnosticCollection(){LockDiagnosticRing r=new LockDiagnosticRing();r.start(0);r.revoke();assertFalse(r.state(1).active);assertEquals(6,r.state(1).reason);}
+    @Test public void diagnosticCallerStillRequiresExactPidAndRecord(){Object record=new Object();var identity=new ProducerSessionGuard.Identity(11,1000,7,"com.android.systemui","com.android.systemui",record);var guard=new ProducerSessionGuard(identity);assertFalse(guard.accepts(12,1000,identity));assertFalse(guard.accepts(11,1001,identity));assertFalse(guard.accepts(11,1000,new ProducerSessionGuard.Identity(11,1000,8,"com.android.systemui","com.android.systemui",record)));}
+    @Test public void lowPrivilegeDiagnosticCannotInvokePlaybackOrExport(){assertFalse(LockDiagnosticRolePolicy.allows(3,1));assertFalse(LockDiagnosticRolePolicy.allows(3,3));assertFalse(LockDiagnosticRolePolicy.allows(3,4));assertFalse(LockDiagnosticRolePolicy.allows(3,7));assertFalse(LockDiagnosticRolePolicy.allows(3,10));}
+    @Test public void stoppedBufferCannotAccumulateTouchMetadata(){LockDiagnosticRing r=new LockDiagnosticRing();String t=r.start(0).token;r.stop(t,1);assertFalse(r.record(t,2,0,input(),9000));assertEquals(0,r.state(2).rows);}
+}

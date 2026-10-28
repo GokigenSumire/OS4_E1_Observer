@@ -1,0 +1,12 @@
+<resources>
+    <style name="Theme.HomeCompat" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">@color/dashboard_accent</item>
+        <item name="android:windowBackground">@color/dashboard_background</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@color/dashboard_background</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+</resources>
