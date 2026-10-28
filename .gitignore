@@ -1,0 +1,54 @@
+# built application files
+*.apk
+
+# files for the dex VM
+*.dex
+
+# Java class files
+*.class
+
+# generated files
+bin/
+gen/
+out/
+build/
+.gradle/
+.kotlin/
+.ART
+# Project files
+*.iml
+.idea
+# .idea/workspace.xml
+.vscode
+
+# Local configuration file (sdk path, etc)
+local.properties
+keystore.properties
+*.jks
+*.keystore
+
+# Windows thumbnail db
+.DS_Store
+
+# 本地索引、候选归档和临时日志
+.codegraph/
+/artifacts/
+/releases/
+*.log
+
+# 其他分发与本机构建产物
+*.aab
+*.apks
+.cxx/
+.externalNativeBuild/
+Thumbs.db
+
+# 私有签名材料与本机环境；示例配置仍可提交
+.private-signing/
+*.p12
+*.pfx
+*.dpapi
+.env
+.env.*
+!.env.example
+!.env.sample
