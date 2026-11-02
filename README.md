@@ -6,7 +6,7 @@
 
 模块 **97／1.1.22-gesture-continuity**，正式包名 `personal.wallpaper.os4.e1`；配套主应用 **94／1.2.6-p10-input-priority**。最低API31，targetSdk37，主要实测设备为小米17 Pro／Android16。
 
-对应APK、冻结源码与校验文件见[主仓库Releases](https://github.com/GokigenSumire/OS3_Wallpaper_Changer/releases)。本仓库保存模块源码，两个工程分别管理。
+对应APK、冻结源码与校验文件见[模块独立Release](https://github.com/GokigenSumire/OS4_E1_Observer/releases/tag/v1.1.22-p10-m97)，主应用见[主仓库Releases](https://github.com/GokigenSumire/OS3_Wallpaper_Changer/releases)。两个工程分别管理，安装及验证边界见[模块97发布说明](docs/releases/模块97.md)。
 
 ## 功能范围
 
@@ -29,7 +29,7 @@
 
 小米17 Pro用户已确认主94／模块97“测试基本符合预期”。模块正式构建1324项单测／80类通过，lint0错误29警告；联合门禁340项及45＋10项有效定向通过。
 
-完整反例695/696匹配，一项预期原子状态门禁与实际拒绝项不一致，仍待修复复验。P10保持IN_PROGRESS；未逐项回传的用例不补记PASS，其他系统和长期边界以实际验证为准。
+原完整反例695/696匹配，一项预期原子状态门禁与实际拒绝项不一致；断言修正后的单项定向复验已通过，完整696项复验及最终候选绑定仍待完成。本次正式发布保留这两项核验债务，P10保持IN_PROGRESS；未逐项回传的用例不补记PASS，其他系统和长期边界以实际验证为准。
 
 ## 本地构建
 
