@@ -4,7 +4,7 @@
 
 ## 当前版本
 
-模块 **97／1.1.22-gesture-continuity**，正式包名 `personal.wallpaper.os4.e1`；配套主应用 **94／1.2.6-p10-input-priority**。最低API31，targetSdk37，主要实测设备为小米17 Pro／Android16。
+模块 **97／1.1.22-gesture-continuity**，正式包名 `personal.wallpaper.os4.e1`；当前配套主应用 **102／1.3.4-p11-header**（原主94兼容记录保留）。最低API31，targetSdk37，主要实测设备为小米17 Pro／Android16。
 
 对应APK、冻结源码与校验文件见[模块独立Release](https://github.com/GokigenSumire/OS4_E1_Observer/releases/tag/v1.1.22-p10-m97)，主应用见[主仓库Releases](https://github.com/GokigenSumire/OS3_Wallpaper_Changer/releases)。两个工程分别管理，安装及验证边界见[模块97发布说明](docs/releases/模块97.md)。
 
@@ -24,6 +24,10 @@
 初装兼容意愿默认关闭。最高优先级下，通知、媒体、顶部边缘等界面区域不作为手势避让区，系统动作可能同时响应；进入锁屏图片编辑仍须系统正常解锁。实际LOCK、来源与通道身份、图片票据和访问边界继续核验。
 
 关闭最高优先级恢复默认局部保护，关闭LOCK兼容撤销旧识别与未发意图。必要时在LSPosed禁用模块并正常重启；保留主应用数据和来源授权。
+
+## 主102组合验证（2026-11-04）
+
+模块97原APK及源码保持，主102已获小米17 Pro两批用户测试PASS，包含锁屏媒体与手势烟测。本轮仅同步文档，模块不重编／重签，原Release标签与附件不变；[主102正式Release](https://github.com/GokigenSumire/OS3_Wallpaper_Changer/releases/tag/v1.3.4-p11-r102-m97)提供配套安装文件与校验。新增兼容记录见[说明](docs/releases/主102兼容记录.md)。
 
 ## 最近验证记录（2026-10-28）
 
