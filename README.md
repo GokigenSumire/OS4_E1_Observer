@@ -4,9 +4,11 @@
 
 ## 当前版本
 
-模块 **97／1.1.22-gesture-continuity**，正式包名 `personal.wallpaper.os4.e1`；当前配套主应用 **102／1.3.4-p11-header**（原主94兼容记录保留）。最低API31，targetSdk37，主要实测设备为小米17 Pro／Android16。
+模块 **99／1.1.24-updates**，正式包名 `personal.wallpaper.os4.e1`，保留原签名连续覆盖。配套主应用116，主115也可使用；最低API31，targetSdk37。
 
-对应APK、冻结源码与校验文件见[模块独立Release](https://github.com/GokigenSumire/OS4_E1_Observer/releases/tag/v1.1.22-p10-m97)，主应用见[主仓库Releases](https://github.com/GokigenSumire/OS3_Wallpaper_Changer/releases)。两个工程分别管理，安装及验证边界见[模块97发布说明](docs/releases/模块97.md)。
+安装包、对应源码、许可与SHA-256见[模块99正式发布](https://github.com/GokigenSumire/OS4_E1_Observer/releases/tag/99-1.1.24-updates)；[本轮说明与验证边界](docs/releases/模块99.md)。新版关于区域提供手动检查更新、发布说明与下载、复制版本和项目链接；管理器描述简化为一句话。模块尚未收录LSPosed官方仓库，命名例外申请推进中，未获得审批。
+
+Debug／Release各1346项测试、lint各0错误／31警告、86项完整任务、23项候选门禁及16个反例通过。与先给用户的模块99 APK为同一字节，实机NOT_RUN；旧97用户测试不迁移至99，P10既有未决项保留。
 
 ## 功能范围
 

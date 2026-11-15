@@ -7,8 +7,8 @@ android {
         applicationId 'personal.wallpaper.os4.e1'
         minSdk 31
         targetSdk 37
-        versionCode 97
-        versionName '1.1.22-gesture-continuity'
+        versionCode 99
+        versionName '1.1.24-updates'
     }
     signingConfigs {
         formal {

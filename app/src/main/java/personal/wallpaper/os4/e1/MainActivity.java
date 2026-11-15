@@ -37,6 +37,10 @@ public final class MainActivity extends Activity {
     private static final int SAVE_OK = 0, SAVE_ENABLE_FAILED = 1, SAVE_DISABLE_FAILED = 2;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ArrayList<Button> buttons = new ArrayList<>();
+    private final java.util.concurrent.ExecutorService updateExecutor = java.util.concurrent.Executors.newSingleThreadExecutor();
+    private TextView updateStatus;
+    private Button checkUpdates;
+    private personal.wallpaper.update.ReleaseUpdateChecker.Result updateResult;
     private LinearLayout stateCard;
     private TextView stateTitle, stateBody, sample, savedSetting, saveWarning, notice;
     private TextView wallpaperIdentity, wallpaperAvailability;
@@ -66,7 +70,7 @@ public final class MainActivity extends Activity {
     private final Runnable lockStatusRefresh = new Runnable() {
         @Override public void run() {
             if (destroyed) return;
-            if (lockStatus != null) lockStatus.setText("锁屏兼容状态：" + LockRelayService.status(MainActivity.this));
+            if (lockStatus != null) { lockStatus.setText("锁屏：" + LockRelayService.status(MainActivity.this)); render(); }
             main.postDelayed(this, 1000);
         }
     };
@@ -138,7 +142,7 @@ public final class MainActivity extends Activity {
         });
         savedSetting = text(setting, "", 14, true, R.color.dashboard_secondary);
         margin(savedSetting, 8, 8);
-        text(setting, getString(R.string.dashboard_setting_policy), 13, false, R.color.dashboard_secondary);
+
         saveWarning = text(setting, "", 13, true, R.color.dashboard_warning_text);
         saveWarning.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         margin(saveWarning, 10, 0);
@@ -155,7 +159,7 @@ public final class MainActivity extends Activity {
         lockEnabledSwitch.setChecked(LockRelayService.isDesiredEnabled(this));
         lockSetting.addView(lockEnabledSwitch, new LinearLayout.LayoutParams(-1, -2));
         lockStatus = text(lockSetting, "", 14, false, R.color.dashboard_secondary);
-        text(lockSetting, "仅本项目独立锁屏；双击下一张、三击上一张、两指双击经系统安全解锁后编辑。需要系统框架与系统界面作用域；开关保存后持续开启，重启重新核定身份。", 13, false, R.color.dashboard_secondary);
+        text(lockSetting, "双击下一张，三击上一张，两指双击解锁后编辑。", 13, false, R.color.dashboard_secondary);
         lockEnabledSwitch.setOnCheckedChangeListener((button, checked) -> {
             if (!LockRelayService.setDesiredEnabled(this, checked)) {
                 lockStatus.setText("开关未确认保存，当前锁屏兼容暂停，请重试。");
@@ -166,17 +170,25 @@ public final class MainActivity extends Activity {
         nativeSwitch=new Switch(this);nativeSwitch.setTag("native_input_switch");nativeSwitch.setText("原生锁屏业务输入（推荐）");
         nativeSwitch.setTextColor(color(R.color.dashboard_text));nativeSwitch.setMinHeight(dp(56));lockSetting.addView(nativeSwitch,new LinearLayout.LayoutParams(-1,-2));
         nativeStatus=text(lockSetting,"",14,false,R.color.dashboard_secondary);
-        text(lockSetting,"只在本项目LOCK、有效会话下识别三手势，双击／三击优先时本次原生双击息屏不执行。下方开启原生锁屏手势优先可取消普通区域避让；两指编辑仍需系统安全解锁。",13,false,R.color.dashboard_secondary);
+        text(lockSetting,"在当前锁屏识别手势；原生双击息屏可能被替代。",13,false,R.color.dashboard_secondary);
         renderNative();
         nativeSwitch.setOnCheckedChangeListener((button,checked)->{if(renderingNative)return;boolean saved=LockRelayService.setNativeInputEnabled(this,checked);renderNative();if(!saved)nativeStatus.setText("输入路线未确认保存，当前锁屏兼容暂停，请重试。");});
+        LinearLayout lockOptions = column();
+        lockOptions.setVisibility(View.GONE);
+        Button disclosure = button(lockSetting, R.string.dashboard_lock_options, () -> {
+            boolean show = lockOptions.getVisibility() != View.VISIBLE;
+            lockOptions.setVisibility(show ? View.VISIBLE : View.GONE);
+        });
+        disclosure.setTag("lock_options_disclosure");
+        lockSetting.addView(lockOptions);
         forceLocalSwitch=new Switch(this);
         forceLocalSwitch.setTag("force_local_switch");
         forceLocalSwitch.setText("强制局部兼容（顶部20%禁区）");
         forceLocalSwitch.setTextColor(color(R.color.dashboard_text));
         forceLocalSwitch.setMinHeight(dp(56));
-        lockSetting.addView(forceLocalSwitch,new LinearLayout.LayoutParams(-1,-2));
-        forceLocalStatus=text(lockSetting,"",14,false,R.color.dashboard_warning_text);
-        text(lockSetting,"仅精确状态栏跳过内部布局检查；顶部20%不能切图。可能与越界控件冲突，密码／指纹、通知和系统安全解锁保护不取消。关闭可回到保守模式。",13,false,R.color.dashboard_secondary);
+        lockOptions.addView(forceLocalSwitch,new LinearLayout.LayoutParams(-1,-2));
+        forceLocalStatus=text(lockOptions,"",14,false,R.color.dashboard_warning_text);
+        text(lockOptions,"顶部20%不识别手势；系统认证保护保留。",13,false,R.color.dashboard_secondary);
         renderForceLocal();
         forceLocalSwitch.setOnCheckedChangeListener((button,checked)->{
             if(renderingForce)return;
@@ -190,8 +202,8 @@ public final class MainActivity extends Activity {
         });
         prioritySwitch=new Switch(this);prioritySwitch.setTag("wallpaper_priority_switch");
         prioritySwitch.setText("锁屏手势最高优先级");prioritySwitch.setTextColor(color(R.color.dashboard_text));prioritySwitch.setMinHeight(dp(56));
-        lockSetting.addView(prioritySwitch,new LinearLayout.LayoutParams(-1,-2));priorityStatus=text(lockSetting,"",14,false,R.color.dashboard_warning_text);
-        text(lockSetting,"上方原生锁屏业务输入开启时，三手势不受通知、音乐、面板、认证控件、主题、顶部或边缘限制；图片忙碌时先识别再顺序处理，系统动作可能同时响应。沿用已保存的壁纸优先开关；关闭恢复原策略。打开图片编辑仍须系统正常解锁。",13,false,R.color.dashboard_secondary);
+        lockOptions.addView(prioritySwitch,new LinearLayout.LayoutParams(-1,-2));priorityStatus=text(lockOptions,"",14,false,R.color.dashboard_warning_text);
+        text(lockOptions,"系统动作可能同时响应；编辑仍须安全解锁。",13,false,R.color.dashboard_secondary);
         renderPriority();
         renderNative();
         prioritySwitch.setOnCheckedChangeListener((button,checked)->{
@@ -213,14 +225,33 @@ public final class MainActivity extends Activity {
         margin(wallpaperIdentity, 10, 4);
         wallpaperAvailability = text(companion, "", 12, false, R.color.dashboard_secondary);
         button(companion, R.string.dashboard_open_wallpaper, this::openWallpaperApp);
-        TextView hint = text(companion, getString(R.string.dashboard_wallpaper_optional), 12, false, R.color.dashboard_secondary);
-        margin(hint, 10, 0);
+
 
         LinearLayout protection = card(box);
         text(protection, getString(R.string.dashboard_protection_title), 16, true, R.color.dashboard_text);
-        TextView scope = text(protection, getString(R.string.dashboard_protection_body), 13, false, R.color.dashboard_secondary);
-        margin(scope, 10, 8);
-        text(protection, getString(R.string.dashboard_recovery_hint), 12, false, R.color.dashboard_secondary);
+        button(protection, R.string.dashboard_scope_details, () -> new AlertDialog.Builder(this)
+                .setTitle(R.string.dashboard_protection_title)
+                .setMessage(getString(R.string.dashboard_protection_body) + "\n\n" + getString(R.string.dashboard_recovery_hint))
+                .setPositiveButton("知道了", null).show());
+        LinearLayout about = card(box);
+        text(about, "关于与更新", 19, true, R.color.dashboard_text);
+        text(about, BuildConfig.VERSION_NAME + "（" + BuildConfig.VERSION_CODE + "）", 15, true, R.color.dashboard_text);
+        updateStatus = text(about, "手动检查最新正式版本", 14, false, R.color.dashboard_secondary);
+        updateStatus.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        checkUpdates = button(about, R.string.about_check_updates, this::checkForUpdates);
+        // 更新按钮不受桌面兼容命令的忙碌状态控制。
+        buttons.remove(checkUpdates);
+        buttons.remove(button(about, R.string.about_releases, () -> openProjectUrl(updateResult == null
+                ? personal.wallpaper.update.ReleaseUpdateChecker.Product.MODULE.releasesUrl() : updateResult.pageUrl)));
+        buttons.remove(button(about, R.string.about_copy_version, () -> {
+            android.content.ClipboardManager clipboard = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("版本信息",
+                    "Hyper Wallpaper 兼容\n" + BuildConfig.VERSION_NAME + " (" + BuildConfig.VERSION_CODE + ")\n" + BuildConfig.APPLICATION_ID));
+            android.widget.Toast.makeText(this, "已复制版本信息", android.widget.Toast.LENGTH_SHORT).show();
+        }));
+        projectLink(about, "主应用源码", "https://github.com/GokigenSumire/OS3_Wallpaper_Changer");
+        projectLink(about, "兼容模块源码", "https://github.com/GokigenSumire/OS4_E1_Observer");
+        projectLink(about, "模块问题反馈", "https://github.com/GokigenSumire/OS4_E1_Observer/issues");
         notice = text(box, "", 13, false, R.color.dashboard_warning_text);
         notice.setVisibility(View.GONE);
         notice.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
@@ -463,9 +494,12 @@ public final class MainActivity extends Activity {
                 default -> { title = R.string.dashboard_invalid_title; body = R.string.dashboard_invalid_body; }
             }
         }
-        stateTitle.setText(title);
-        stateBody.setText(body);
-        boolean positive = current != null && current.positive && saveFailure == SAVE_OK;
+        CompatDashboardSummary summary = CompatDashboardSummary.from(
+                preference.available, preference.enabled, LockRelayService.isDesiredEnabled(this),
+                getString(title), getString(body), LockRelayService.status(this));
+        stateTitle.setText(summary.title);
+        stateBody.setText(summary.body);
+        boolean positive = !LockRelayService.isDesiredEnabled(this) && current != null && current.positive && saveFailure == SAVE_OK;
         int textColor = color(positive ? R.color.dashboard_positive_text : R.color.dashboard_warning_text);
         stateTitle.setTextColor(textColor);
         stateBody.setTextColor(textColor);
@@ -581,6 +615,38 @@ public final class MainActivity extends Activity {
         buttons.add(button);
         return button;
     }
+    private void checkForUpdates() {
+        if (destroyed || !checkUpdates.isEnabled()) return;
+        checkUpdates.setEnabled(false);
+        updateStatus.setText("正在检查更新…");
+        updateExecutor.execute(() -> {
+            var result = new personal.wallpaper.update.ReleaseUpdateChecker().check(
+                    personal.wallpaper.update.ReleaseUpdateChecker.Product.MODULE, BuildConfig.VERSION_CODE);
+            main.post(() -> {
+                if (destroyed) return;
+                updateResult = result;
+                updateStatus.setText(result.message());
+                checkUpdates.setEnabled(true);
+            });
+        });
+    }
+    private void openProjectUrl(String url) {
+        try { startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))); }
+        catch (ActivityNotFoundException | SecurityException unavailable) {
+            android.widget.Toast.makeText(this, "未找到可打开链接的应用", android.widget.Toast.LENGTH_SHORT).show();
+        }
+    }
+    private void projectLink(LinearLayout parent, String label, String url) {
+        TextView link = text(parent, label, 15, true, R.color.dashboard_accent);
+        link.setMinHeight(dp(48)); link.setGravity(Gravity.CENTER_VERTICAL);
+        link.setContentDescription(label + "，" + url);
+        link.setOnClickListener(v -> {
+            try { startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))); }
+            catch (ActivityNotFoundException | SecurityException unavailable) {
+                android.widget.Toast.makeText(this, "未找到可打开链接的应用", android.widget.Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
     private GradientDrawable shape(int fill, int stroke, int radius) {
         GradientDrawable drawable = new GradientDrawable();
         drawable.setColor(fill);
@@ -614,6 +680,7 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onDestroy() {
         destroyed = true;
+        updateExecutor.shutdownNow();
         main.removeCallbacksAndMessages(null);
         super.onDestroy();
     }
