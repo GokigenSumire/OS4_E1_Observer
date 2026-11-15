@@ -104,7 +104,7 @@ public class LockDebugActivity extends Activity {
             view.setPadding(bars.left, bars.top, bars.right, bars.bottom); return insets;
         });
         label(column, "调试与日志", 24);
-        label(column, "独立LOCK诊断，最多200秒。请先停止再开始新一轮；开始只清已停止的旧诊断记录，不改图库、顺序或HOME／LOCK永久开关。", 14);
+        label(column, "锁屏诊断，最长200秒。开始会清除已停止的旧记录；桌面／锁屏开关和图库设置不变。", 14);
         label(column, "开始后锁屏立即尝试动作，再正常解锁返回、停止并读取。无需等待11秒，不延长锁屏亮屏时间。", 14);
         label(column, "布局拒绝会细分固定原因及层类别；诊断记录不等于手势次数，也不代表安全条件已放行。", 14);
         state = label(column, "尚未读取诊断状态。", 14); state.setTag("diag_state");

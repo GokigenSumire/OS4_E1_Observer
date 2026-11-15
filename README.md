@@ -4,11 +4,11 @@
 
 ## 当前版本
 
-模块 **99／1.1.24-updates**，正式包名 `personal.wallpaper.os4.e1`，保留原签名连续覆盖。配套主应用117，主115／116也可使用；最低API31，targetSdk37。
+模块 **100／1.1.25-independent-controls**，正式包名personal.wallpaper.os4.e1，原正式签名覆盖，保留桌面／锁屏各自设置；配套主应用118，主117也可使用。最低API31，targetSdk37。
 
-安装包、对应源码、许可与SHA-256见[模块99正式发布](https://github.com/GokigenSumire/OS4_E1_Observer/releases/tag/99-1.1.24-updates)；[本轮说明与验证边界](docs/releases/模块99.md)。新版关于区域提供手动检查更新、发布说明与下载、复制版本和项目链接；管理器描述简化为一句话。模块尚未收录LSPosed官方仓库；[首次自动申请2603](https://github.com/Xposed-Modules-Repo/submission/issues/2603)因包名规则关闭，已按机器人引导提交[人工申诉2604](https://github.com/Xposed-Modules-Repo/submission/issues/2604)，等待人工审核，未更换安装身份。
+[模块100发布与对应源码](https://github.com/GokigenSumire/OS4_E1_Observer/releases/tag/100-1.1.25-independent-controls)。桌面和锁屏各自独立卡片、状态与开关；桌面在处理、恢复或系统未连接时仍可改选，先保存用户意愿并显示提醒，实际开启仍保留原安全准入。旧查询／回执不能覆盖新操作。
 
-Debug／Release各1346项测试、lint各0错误／31警告、86项完整任务、23项候选门禁及16个反例通过。与先给用户的模块99 APK为同一字节，实机NOT_RUN；旧97用户测试不迁移至99，P10既有未决项保留。
+主页面精简说明，锁屏选项、帮助、项目详情和诊断按需打开，版本更新入口保留。本轮自动结果见Release附件，实机未验证；旧99及更早用户测试不迁移。本模块仍未收录LSPosed官方仓库，[人工申诉2604](https://github.com/Xposed-Modules-Repo/submission/issues/2604)待审，未更改安装身份。
 
 ## 功能范围
 

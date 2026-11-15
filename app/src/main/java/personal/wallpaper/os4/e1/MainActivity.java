@@ -23,493 +23,217 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
-import java.text.DateFormat;
 import java.util.ArrayList;
-import java.util.Date;
-import java.util.Objects;
 import personal.wallpaper.os4.e1.core.HomeScope;
 import personal.wallpaper.os4.e1.relay.LockRelayService;
-import personal.wallpaper.os4.e1.relay.ForceLocalSetting;
-import personal.wallpaper.os4.e1.relay.WallpaperPrioritySetting;
 
-/** 日常兼容设置；已保存意愿与系统当前生效独立显示，状态查询不改变开关。 */
+/** 桌面和锁屏分别保存、分别呈现；主开关可一直操作，实际准入仍由各自服务确认。 */
 public final class MainActivity extends Activity {
-    private static final int SAVE_OK = 0, SAVE_ENABLE_FAILED = 1, SAVE_DISABLE_FAILED = 2;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ArrayList<Button> buttons = new ArrayList<>();
     private final java.util.concurrent.ExecutorService updateExecutor = java.util.concurrent.Executors.newSingleThreadExecutor();
-    private TextView updateStatus;
-    private Button checkUpdates;
+    private DesktopToggleController home;
+    private Switch enabledSwitch, lockEnabledSwitch, nativeSwitch, forceLocalSwitch, prioritySwitch;
+    private TextView homeState, homeNotice, lockStatus, nativeStatus, forceLocalStatus, priorityStatus;
+    private TextView wallpaperIdentity, wallpaperAvailability, notice, updateStatus;
+    private Button checkUpdates, homeRetry;
     private personal.wallpaper.update.ReleaseUpdateChecker.Result updateResult;
-    private LinearLayout stateCard;
-    private TextView stateTitle, stateBody, sample, savedSetting, saveWarning, notice;
-    private TextView wallpaperIdentity, wallpaperAvailability;
-    private Switch enabledSwitch;
-    private Switch lockEnabledSwitch;
-    private TextView lockStatus;
-    private Switch forceLocalSwitch;
-    private TextView forceLocalStatus;
-    private boolean renderingForce;
-    private Switch prioritySwitch;
-    private TextView priorityStatus;
-    private Switch nativeSwitch;
-    private TextView nativeStatus;
-    private boolean renderingNative;
-    private boolean renderingPriority;
-    private Button applySetting, stopCurrent;
-    private Bundle lastResponse;
-    private DashboardState current;
-    private CompatPreferenceStore.State preference;
-    private long controlEpoch = -1;
-    private String controlBootSession;
-    private String responseIssue;
-    private String sampledAt;
-    private int saveFailure;
-    private boolean busy, confirmationVisible, renderingSwitch, destroyed;
-    /** Only renders the local fixed summary; never polls Binder or changes either switch. */
+    private boolean renderingHome, renderingLock, renderingNative, renderingForce, renderingPriority, destroyed;
     private final Runnable lockStatusRefresh = new Runnable() {
         @Override public void run() {
             if (destroyed) return;
-            if (lockStatus != null) { lockStatus.setText("锁屏：" + LockRelayService.status(MainActivity.this)); render(); }
+            renderLock();
             main.postDelayed(this, 1000);
         }
     };
-    private interface Reply { void accept(Bundle result); }
-
     @Override public void onCreate(Bundle state) {
         setTheme(R.style.Theme_HomeCompat);
         super.onCreate(state);
-        if (state != null) saveFailure = state.getInt("preferenceSaveFailure", SAVE_OK);
+        home = new DesktopToggleController(new DesktopToggleController.Store() {
+            public CompatPreferenceStore.State read() { return CompatPreferenceStore.read(MainActivity.this); }
+            public boolean save(boolean enabled) { return CompatPreferenceStore.setEnabled(MainActivity.this, enabled); }
+        }, new DesktopToggleController.Backend() {
+            public void status(DesktopToggleController.Callback cb) { sendHome("STATUS", null, -1, cb); }
+            public void enable(CompatPreferenceStore.State saved, DesktopToggleController.Ticket ticket, DesktopToggleController.Callback cb) {
+                // 控制器已校验最新代次／保存revision；传递同一保存结果，不读取另一次选择的revision。
+                sendHome("DAILY_ON", ticket, saved.revision, cb);
+            }
+            public void stop(long revision, DesktopToggleController.Callback cb) { sendHome("DAILY_OFF", null, revision, cb); }
+        }, this::renderDesktop);
         createDashboard();
-        render();
+        renderDesktop(); renderLock();
     }
-
     private void createDashboard() {
         LinearLayout screen = column();
         screen.setBackgroundColor(color(R.color.dashboard_background));
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        scroll.setClipToPadding(false);
-        LinearLayout box = column();
-        box.setPadding(dp(20), dp(16), dp(20), dp(28));
-        scroll.addView(box);
-        screen.addView(scroll, new LinearLayout.LayoutParams(-1, -1));
-        screen.setOnApplyWindowInsetsListener((view, insets) -> {
+        ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true); scroll.setClipToPadding(false);
+        LinearLayout box = column(); box.setPadding(dp(20), dp(16), dp(20), dp(28)); scroll.addView(box);
+        screen.addView(scroll, new LinearLayout.LayoutParams(-1,-1));
+        screen.setOnApplyWindowInsetsListener((view,insets) -> {
             android.graphics.Insets bars = insets.getInsets(android.view.WindowInsets.Type.systemBars());
-            view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
-            return insets;
+            view.setPadding(bars.left,bars.top,bars.right,bars.bottom); return insets;
         });
-        LinearLayout brand = new LinearLayout(this);
-        brand.setGravity(Gravity.CENTER_VERTICAL);
-        ImageView icon = new ImageView(this);
-        icon.setImageDrawable(getApplicationInfo().loadIcon(getPackageManager()));
+        LinearLayout brand = new LinearLayout(this); brand.setGravity(Gravity.CENTER_VERTICAL);
+        ImageView icon = new ImageView(this); icon.setImageDrawable(getApplicationInfo().loadIcon(getPackageManager()));
         icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        LinearLayout.LayoutParams iconSize = new LinearLayout.LayoutParams(dp(48), dp(48));
-        iconSize.setMarginEnd(dp(14));
-        brand.addView(icon, iconSize);
-        LinearLayout brandText = column();
-        text(brandText, getApplicationInfo().loadLabel(getPackageManager()).toString(), 24, true, R.color.dashboard_text);
-        text(brandText, getString(R.string.dashboard_version, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE), 13, false, R.color.dashboard_secondary);
-        brand.addView(brandText, new LinearLayout.LayoutParams(0, -2, 1));
-        box.addView(brand);
-        TextView kicker = text(box, getString(R.string.dashboard_kicker), 14, false, R.color.dashboard_secondary);
-        margin(kicker, 8, 20);
+        LinearLayout.LayoutParams iconSize = new LinearLayout.LayoutParams(dp(44),dp(44)); iconSize.setMarginEnd(dp(12)); brand.addView(icon,iconSize);
+        LinearLayout brandText=column(); text(brandText,"Hyper Wallpaper 兼容",23,true,R.color.dashboard_text);
+        text(brandText,BuildConfig.VERSION_NAME,12,false,R.color.dashboard_secondary); brand.addView(brandText,new LinearLayout.LayoutParams(0,-2,1));
+        box.addView(brand); margin(brand,0,20);
 
-        stateCard = card(box);
-        text(stateCard, getString(R.string.dashboard_status_label), 12, true, R.color.dashboard_warning_text);
-        stateTitle = text(stateCard, getString(R.string.dashboard_unchecked_title), 25, true, R.color.dashboard_warning_text);
-        margin(stateTitle, 8, 8);
-        stateTitle.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
-        stateBody = text(stateCard, getString(R.string.dashboard_unchecked_body), 14, false, R.color.dashboard_warning_text);
-        sample = text(stateCard, "", 11, false, R.color.dashboard_warning_text);
-        margin(sample, 12, 0);
+        LinearLayout desktop=card(box);
+        enabledSwitch=targetSwitch(desktop,"桌面","home_switch");
+        homeState=text(desktop,"状态待确认",14,true,R.color.dashboard_secondary);homeState.setTag("home_status");
+        homeState.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        homeNotice=text(desktop,"",13,false,R.color.dashboard_warning_text);homeNotice.setTag("home_notice");
+        homeNotice.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        homeRetry=button(desktop,R.string.dashboard_retry,home::retry);
+        enabledSwitch.setOnCheckedChangeListener((view,checked)-> {if(!renderingHome)home.change(checked);});
 
-        LinearLayout setting = card(box);
-        enabledSwitch = new Switch(this);
-        enabledSwitch.setText(R.string.dashboard_setting_title);
-        enabledSwitch.setTextSize(19);
-        enabledSwitch.setTextColor(color(R.color.dashboard_text));
-        enabledSwitch.setTextOn(getString(R.string.dashboard_on));
-        enabledSwitch.setTextOff(getString(R.string.dashboard_off));
-        enabledSwitch.setShowText(true);
-        enabledSwitch.setMinHeight(dp(56));
-        enabledSwitch.setPadding(0, dp(8), 0, dp(8));
-        setting.addView(enabledSwitch, new LinearLayout.LayoutParams(-1, -2));
-        enabledSwitch.setOnCheckedChangeListener((button, checked) -> {
-            if (renderingSwitch) return;
-            render();
-            requestChange(checked);
+        LinearLayout lock=card(box);
+        lockEnabledSwitch=targetSwitch(lock,"锁屏","lock_switch");
+        lockStatus=text(lock,"",14,true,R.color.dashboard_secondary);lockStatus.setTag("lock_status");
+        lockStatus.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        lockEnabledSwitch.setOnCheckedChangeListener((view,checked)-> {
+            if(renderingLock)return;
+            boolean saved=LockRelayService.setDesiredEnabled(this,checked);
+            renderLock();
+            if(!saved)android.widget.Toast.makeText(this,"锁屏设置未保存，请重试",android.widget.Toast.LENGTH_SHORT).show();
         });
-        savedSetting = text(setting, "", 14, true, R.color.dashboard_secondary);
-        margin(savedSetting, 8, 8);
-
-        saveWarning = text(setting, "", 13, true, R.color.dashboard_warning_text);
-        saveWarning.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
-        margin(saveWarning, 10, 0);
-        applySetting = button(setting, R.string.dashboard_apply_setting, () -> requestChange(true));
-        stopCurrent = button(setting, R.string.dashboard_stop_current, () -> requestChange(false));
-        button(setting, R.string.dashboard_refresh, this::refreshStatus);
-
-        LinearLayout lockSetting = card(box);
-        text(lockSetting, "锁屏手势兼容", 19, true, R.color.dashboard_text);
-        lockEnabledSwitch = new Switch(this);
-        lockEnabledSwitch.setText("启用：开／关");
-        lockEnabledSwitch.setTextColor(color(R.color.dashboard_text));
-        lockEnabledSwitch.setMinHeight(dp(56));
-        lockEnabledSwitch.setChecked(LockRelayService.isDesiredEnabled(this));
-        lockSetting.addView(lockEnabledSwitch, new LinearLayout.LayoutParams(-1, -2));
-        lockStatus = text(lockSetting, "", 14, false, R.color.dashboard_secondary);
-        text(lockSetting, "双击下一张，三击上一张，两指双击解锁后编辑。", 13, false, R.color.dashboard_secondary);
-        lockEnabledSwitch.setOnCheckedChangeListener((button, checked) -> {
-            if (!LockRelayService.setDesiredEnabled(this, checked)) {
-                lockStatus.setText("开关未确认保存，当前锁屏兼容暂停，请重试。");
-                return;
-            }
-            lockStatus.setText(checked ? "已保存开启，等待独立锁屏连接与输入准入。" : "已保存关闭，正在撤销锁屏会话。");
+        LinearLayout lockOptions=column();lockOptions.setVisibility(View.GONE);
+        Button disclosure=button(lock,R.string.dashboard_lock_options,()->lockOptions.setVisibility(lockOptions.getVisibility()==View.VISIBLE?View.GONE:View.VISIBLE));
+        disclosure.setTag("lock_options_disclosure");lock.addView(lockOptions);
+        nativeSwitch=targetSwitch(lockOptions,"原生锁屏输入","native_input_switch");
+        nativeStatus=text(lockOptions,"",12,false,R.color.dashboard_secondary);
+        nativeSwitch.setOnCheckedChangeListener((view,checked)-> {
+            if(renderingNative)return; boolean saved=LockRelayService.setNativeInputEnabled(this,checked);renderOptions();
+            if(!saved)nativeStatus.setText("未保存，请重试");
         });
-        nativeSwitch=new Switch(this);nativeSwitch.setTag("native_input_switch");nativeSwitch.setText("原生锁屏业务输入（推荐）");
-        nativeSwitch.setTextColor(color(R.color.dashboard_text));nativeSwitch.setMinHeight(dp(56));lockSetting.addView(nativeSwitch,new LinearLayout.LayoutParams(-1,-2));
-        nativeStatus=text(lockSetting,"",14,false,R.color.dashboard_secondary);
-        text(lockSetting,"在当前锁屏识别手势；原生双击息屏可能被替代。",13,false,R.color.dashboard_secondary);
-        renderNative();
-        nativeSwitch.setOnCheckedChangeListener((button,checked)->{if(renderingNative)return;boolean saved=LockRelayService.setNativeInputEnabled(this,checked);renderNative();if(!saved)nativeStatus.setText("输入路线未确认保存，当前锁屏兼容暂停，请重试。");});
-        LinearLayout lockOptions = column();
-        lockOptions.setVisibility(View.GONE);
-        Button disclosure = button(lockSetting, R.string.dashboard_lock_options, () -> {
-            boolean show = lockOptions.getVisibility() != View.VISIBLE;
-            lockOptions.setVisibility(show ? View.VISIBLE : View.GONE);
-        });
-        disclosure.setTag("lock_options_disclosure");
-        lockSetting.addView(lockOptions);
-        forceLocalSwitch=new Switch(this);
-        forceLocalSwitch.setTag("force_local_switch");
-        forceLocalSwitch.setText("强制局部兼容（顶部20%禁区）");
-        forceLocalSwitch.setTextColor(color(R.color.dashboard_text));
-        forceLocalSwitch.setMinHeight(dp(56));
-        lockOptions.addView(forceLocalSwitch,new LinearLayout.LayoutParams(-1,-2));
-        forceLocalStatus=text(lockOptions,"",14,false,R.color.dashboard_warning_text);
-        text(lockOptions,"顶部20%不识别手势；系统认证保护保留。",13,false,R.color.dashboard_secondary);
-        renderForceLocal();
-        forceLocalSwitch.setOnCheckedChangeListener((button,checked)->{
+        forceLocalSwitch=targetSwitch(lockOptions,"强制局部兼容","force_local_switch");
+        forceLocalStatus=text(lockOptions,"",12,false,R.color.dashboard_secondary);
+        forceLocalSwitch.setOnCheckedChangeListener((view,checked)-> {
             if(renderingForce)return;
-            renderForceLocal();
-            if(checked){
-                new AlertDialog.Builder(this).setTitle("开启强制局部兼容？")
-                        .setMessage("将跳过精确状态栏内部布局检查，并禁止屏幕顶部20%触发壁纸手势。仍可能与状态栏越界控件冲突；系统认证和其它交互保护保留。此设置会保存，关闭即可恢复保守模式。")
-                        .setNegativeButton("取消",null)
-                        .setPositiveButton("确认开启",(dialog,which)->saveForceLocal(true)).show();
-            }else saveForceLocal(false);
+            if(!checked){saveForce(false);return;}
+            renderOptions();
+            new AlertDialog.Builder(this).setTitle("开启强制局部兼容？")
+                .setMessage("屏幕顶部20%不识别手势，其余区域可能与系统控件冲突。编辑仍需正常认证。")
+                .setNegativeButton("取消",null).setPositiveButton("开启",(dialog,which)->saveForce(true)).show();
         });
-        prioritySwitch=new Switch(this);prioritySwitch.setTag("wallpaper_priority_switch");
-        prioritySwitch.setText("锁屏手势最高优先级");prioritySwitch.setTextColor(color(R.color.dashboard_text));prioritySwitch.setMinHeight(dp(56));
-        lockOptions.addView(prioritySwitch,new LinearLayout.LayoutParams(-1,-2));priorityStatus=text(lockOptions,"",14,false,R.color.dashboard_warning_text);
-        text(lockOptions,"系统动作可能同时响应；编辑仍须安全解锁。",13,false,R.color.dashboard_secondary);
-        renderPriority();
-        renderNative();
-        prioritySwitch.setOnCheckedChangeListener((button,checked)->{
-            if(renderingPriority)return;renderPriority();
-            if(checked)new AlertDialog.Builder(this).setTitle("开启锁屏手势最高优先级？")
-                    .setMessage("当前锁屏内不按通知、音乐、面板、认证控件或主题状态阻断三手势，顶部和边缘也可识别；图片处理忙碌时顺序等待，系统动作可能同时响应。打开图片编辑仍须系统正常解锁。设置持久保存，关闭恢复原策略，原强制局部开关不变；旧输入路线仍保守。")
-                    .setNegativeButton("取消",null).setPositiveButton("接受风险并开启",(dialog,which)->savePriority(true)).show();
-            else savePriority(false);
+        prioritySwitch=targetSwitch(lockOptions,"锁屏手势优先","wallpaper_priority_switch");
+        priorityStatus=text(lockOptions,"",12,false,R.color.dashboard_secondary);
+        prioritySwitch.setOnCheckedChangeListener((view,checked)-> {
+            if(renderingPriority)return;
+            if(!checked){savePriority(false);return;}
+            renderOptions();
+            new AlertDialog.Builder(this).setTitle("开启锁屏手势优先？")
+                .setMessage("通知、音乐控件和顶部边缘也参与识别，系统动作可能同时响应；编辑仍需正常解锁。关闭恢复原策略。")
+                .setNegativeButton("取消",null).setPositiveButton("开启",(dialog,which)->savePriority(true)).show();
         });
+        renderOptions();
 
-        LinearLayout advanced = card(box);
-        text(advanced, "高级", 16, true, R.color.dashboard_text);
-        button(advanced, R.string.dashboard_debug_logs, () ->
-                startActivity(new Intent(this, LockDebugActivity.class)));
+        LinearLayout companion=card(box);
+        text(companion,"主壁纸",16,true,R.color.dashboard_text);
+        wallpaperIdentity=text(companion,"",14,false,R.color.dashboard_secondary);
+        wallpaperAvailability=text(companion,"",12,false,R.color.dashboard_secondary);
+        button(companion,R.string.dashboard_open_wallpaper,this::openWallpaperApp);
 
-        LinearLayout companion = card(box);
-        text(companion, getString(R.string.dashboard_wallpaper_title), 16, true, R.color.dashboard_text);
-        wallpaperIdentity = text(companion, getString(R.string.dashboard_wallpaper_status_unknown), 15, true, R.color.dashboard_text);
-        margin(wallpaperIdentity, 10, 4);
-        wallpaperAvailability = text(companion, "", 12, false, R.color.dashboard_secondary);
-        button(companion, R.string.dashboard_open_wallpaper, this::openWallpaperApp);
+        LinearLayout tools=card(box);
+        button(tools,R.string.dashboard_refresh,home::refresh);
+        button(tools,R.string.dashboard_debug_logs,()->startActivity(new Intent(this,LockDebugActivity.class)));
+        button(tools,R.string.dashboard_scope_details,()->new AlertDialog.Builder(this).setTitle("帮助与恢复")
+            .setMessage("桌面与锁屏各自开启，仅作用于本项目壁纸。需要Root／LSPosed。桌面需系统框架作用域，锁屏另需SystemUI；更新后正常重载。\n\n开关表示已保存选择，实际状态分别显示。系统恢复未确认时开启会等待；仍可随时保存关闭。异常时可在LSPosed停用模块并正常重启，编辑仍需系统认证。")
+            .setPositiveButton("知道了",null).show());
 
-
-        LinearLayout protection = card(box);
-        text(protection, getString(R.string.dashboard_protection_title), 16, true, R.color.dashboard_text);
-        button(protection, R.string.dashboard_scope_details, () -> new AlertDialog.Builder(this)
-                .setTitle(R.string.dashboard_protection_title)
-                .setMessage(getString(R.string.dashboard_protection_body) + "\n\n" + getString(R.string.dashboard_recovery_hint))
-                .setPositiveButton("知道了", null).show());
-        LinearLayout about = card(box);
-        text(about, "关于与更新", 19, true, R.color.dashboard_text);
-        text(about, BuildConfig.VERSION_NAME + "（" + BuildConfig.VERSION_CODE + "）", 15, true, R.color.dashboard_text);
-        updateStatus = text(about, "手动检查最新正式版本", 14, false, R.color.dashboard_secondary);
-        updateStatus.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
-        checkUpdates = button(about, R.string.about_check_updates, this::checkForUpdates);
-        // 更新按钮不受桌面兼容命令的忙碌状态控制。
-        buttons.remove(checkUpdates);
-        buttons.remove(button(about, R.string.about_releases, () -> openProjectUrl(updateResult == null
-                ? personal.wallpaper.update.ReleaseUpdateChecker.Product.MODULE.releasesUrl() : updateResult.pageUrl)));
-        buttons.remove(button(about, R.string.about_copy_version, () -> {
-            android.content.ClipboardManager clipboard = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("版本信息",
-                    "Hyper Wallpaper 兼容\n" + BuildConfig.VERSION_NAME + " (" + BuildConfig.VERSION_CODE + ")\n" + BuildConfig.APPLICATION_ID));
-            android.widget.Toast.makeText(this, "已复制版本信息", android.widget.Toast.LENGTH_SHORT).show();
-        }));
-        projectLink(about, "主应用源码", "https://github.com/GokigenSumire/OS3_Wallpaper_Changer");
-        projectLink(about, "兼容模块源码", "https://github.com/GokigenSumire/OS4_E1_Observer");
-        projectLink(about, "模块问题反馈", "https://github.com/GokigenSumire/OS4_E1_Observer/issues");
-        notice = text(box, "", 13, false, R.color.dashboard_warning_text);
-        notice.setVisibility(View.GONE);
+        LinearLayout about=card(box);
+        text(about,"关于与更新",16,true,R.color.dashboard_text);
+        text(about,BuildConfig.VERSION_NAME+"（"+BuildConfig.VERSION_CODE+"）",13,false,R.color.dashboard_secondary);
+        updateStatus=text(about,"",13,false,R.color.dashboard_secondary);updateStatus.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        checkUpdates=button(about,R.string.about_check_updates,this::checkForUpdates);
+        button(about,R.string.about_releases,()->openProjectUrl(updateResult==null?personal.wallpaper.update.ReleaseUpdateChecker.Product.MODULE.releasesUrl():updateResult.pageUrl));
+        LinearLayout info=column();info.setVisibility(View.GONE);
+        button(about,R.string.dashboard_project_info,()->info.setVisibility(info.getVisibility()==View.VISIBLE?View.GONE:View.VISIBLE));about.addView(info);
+        button(info,R.string.about_copy_version,()-> {
+            android.content.ClipboardManager clip=(android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
+            clip.setPrimaryClip(android.content.ClipData.newPlainText("版本信息","Hyper Wallpaper 兼容\n"+BuildConfig.VERSION_NAME+" ("+BuildConfig.VERSION_CODE+")\n"+BuildConfig.APPLICATION_ID));
+            android.widget.Toast.makeText(this,"已复制版本信息",android.widget.Toast.LENGTH_SHORT).show();
+        });
+        projectLink(info,"主应用源码","https://github.com/GokigenSumire/OS3_Wallpaper_Changer");
+        projectLink(info,"模块源码","https://github.com/GokigenSumire/OS4_E1_Observer");
+        projectLink(info,"问题反馈","https://github.com/GokigenSumire/OS4_E1_Observer/issues");
+        text(info,"GPL-3.0，来源与声明见项目仓库",12,false,R.color.dashboard_secondary);
+        notice=text(box,"",13,false,R.color.dashboard_warning_text);notice.setVisibility(View.GONE);
         notice.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         setContentView(screen);
     }
-
-    /** 恢复前台只重新读取状态，不保存意愿，也不自动开启。 */
-    private void refreshStatus() {
-        if (busy || confirmationVisible || destroyed) return;
-        refreshWallpaperApp();
-        renderForceLocal();
-        renderPriority();
-        busy = true;
-        render();
-        command("STATUS", null, result -> {
-            display(result);
-            busy = false;
-            render();
-        });
+    private Switch targetSwitch(LinearLayout parent,String label,String tag) {
+        Switch view=new Switch(this);view.setText(label);view.setTag(tag);view.setTextSize(19);
+        view.setTextColor(color(R.color.dashboard_text));view.setMinHeight(dp(56));
+        parent.addView(view,new LinearLayout.LayoutParams(-1,-2));return view;
     }
-    private void renderForceLocal(){
-        if(forceLocalSwitch==null)return;
-        ForceLocalSetting.State force=LockRelayService.forceLocalState(this);
-        renderingForce=true;forceLocalSwitch.setChecked(force.available&&force.enabled);renderingForce=false;
-        forceLocalStatus.setText(!force.available?"强制设置未确认，当前兼容暂停，请重试保存。":force.enabled?"已保存：强制模式开；顶部20%禁用手势，实际生效等待新会话。":"已保存：保守模式；强制局部兼容关闭。");
+    private void renderDesktop() {
+        if(enabledSwitch==null||destroyed)return;
+        CompatPreferenceStore.State saved=home.saved();
+        renderingHome=true;enabledSwitch.setChecked(saved.available&&saved.enabled);renderingHome=false;
+        enabledSwitch.setEnabled(true);
+        CompatTargetPresentation state=CompatTargetPresentation.desktop(home.actual,saved,home.pending);
+        homeState.setText(state.text);homeState.setTextColor(color(state.positive?R.color.dashboard_positive_text:R.color.dashboard_secondary));
+        homeNotice.setText(home.message);homeNotice.setVisibility(home.message.isEmpty()?View.GONE:View.VISIBLE);
+        enabledSwitch.setStateDescription(state.text);
+        boolean settled=home.actual!=null&&saved.available&&(
+            saved.enabled&&(home.actual.kind==DashboardState.Kind.ACTIVE||home.actual.kind==DashboardState.Kind.WAITING_TARGET)
+            ||!saved.enabled&&home.actual.kind==DashboardState.Kind.READY);
+        homeRetry.setVisibility(!home.pending&&(!settled||home.savingFailed)?View.VISIBLE:View.GONE);
     }
-    private void saveForceLocal(boolean enabled){
-        boolean saved=LockRelayService.setForceLocalEnabled(this,enabled);
-        renderForceLocal();
-        if(!saved)forceLocalStatus.setText("强制设置未确认保存，当前兼容暂停，请重试。不会把内存回读当作已保存。");
+    private void renderLock() {
+        if(lockEnabledSwitch==null||destroyed)return;
+        boolean desired=LockRelayService.isDesiredEnabled(this);
+        renderingLock=true;lockEnabledSwitch.setChecked(desired);renderingLock=false;
+        lockEnabledSwitch.setEnabled(true);
+        CompatTargetPresentation state=CompatTargetPresentation.lock(desired,LockRelayService.status(this));
+        lockStatus.setText(state.text);lockStatus.setTextColor(color(state.positive?R.color.dashboard_positive_text:R.color.dashboard_secondary));
+        lockEnabledSwitch.setStateDescription(state.text);
     }
-    private void renderPriority(){
-        if(prioritySwitch==null)return;
-        WallpaperPrioritySetting.State priority=LockRelayService.wallpaperPriorityState(this);
-        renderingPriority=true;prioritySwitch.setChecked(priority.available&&priority.enabled);renderingPriority=false;
-        priorityStatus.setText(!priority.available?"设置未确认，当前锁屏兼容暂停，请重试。":priority.enabled?"已保存：锁屏手势最高优先级开，先识别、顺序处理；系统动作可能同时响应。":"已保存：手势优先关闭，采用原局部／保守策略。");
-    }
-    private void savePriority(boolean enabled){
-        boolean saved=LockRelayService.setWallpaperPriorityEnabled(this,enabled);renderPriority();
-        if(!saved)priorityStatus.setText("设置未确认保存，当前兼容暂停，不把内存回读当已保存。请重试。");
-    }
-    private void renderNative(){
-        if(nativeSwitch==null)return;personal.wallpaper.os4.e1.relay.NativeInputSetting.State nativeInput=LockRelayService.nativeInputState(this);
+    private void renderOptions() {
+        if(nativeSwitch==null)return;
+        var nativeInput=LockRelayService.nativeInputState(this);var force=LockRelayService.forceLocalState(this);var priority=LockRelayService.wallpaperPriorityState(this);
         renderingNative=true;nativeSwitch.setChecked(nativeInput.available&&nativeInput.enabled);renderingNative=false;
-        nativeStatus.setText(!nativeInput.available?"路线保存未确认，兼容暂停。":nativeInput.enabled?"原生业务路线：等待实际入口／安全准入；下方两项仅旧路线回退使用。":"原生路线已关闭，恢复原局部／保守策略；原生息屏不接管。");
+        renderingForce=true;forceLocalSwitch.setChecked(force.available&&force.enabled);renderingForce=false;
+        renderingPriority=true;prioritySwitch.setChecked(priority.available&&priority.enabled);renderingPriority=false;
+        nativeStatus.setText(!nativeInput.available?"设置未确认":nativeInput.enabled?"当前锁屏识别，可能替代双击息屏":"使用兼容回退路线");
+        forceLocalStatus.setText(!force.available?"设置未确认":force.enabled?"顶部20%不识别":"保守策略");
+        priorityStatus.setText(!priority.available?"设置未确认":priority.enabled?"系统动作可能同时响应":"常规优先级");
     }
+    private void saveForce(boolean enabled) { boolean saved=LockRelayService.setForceLocalEnabled(this,enabled);renderOptions();if(!saved)forceLocalStatus.setText("未保存，请重试"); }
+    private void savePriority(boolean enabled) { boolean saved=LockRelayService.setWallpaperPriorityEnabled(this,enabled);renderOptions();if(!saved)priorityStatus.setText("未保存，请重试"); }
 
-    private void requestChange(boolean enable) {
-        if (busy || confirmationVisible || destroyed) return;
-        if (!enable) {
-            confirmChange(false, controlEpoch, controlBootSession);
-            return;
+    private void sendHome(String cmd,DesktopToggleController.Ticket ticket,long revision,DesktopToggleController.Callback callback) {
+        Intent intent=new Intent(ControlServer.ACTION).setPackage("android");intent.putExtra("cmd",cmd);
+        if(!"STATUS".equals(cmd)) {
+            intent.putExtra("epoch",ticket==null?-1:ticket.epoch);intent.putExtra("bootSession",ticket==null?null:ticket.boot);intent.putExtra("desiredRevision",revision);
         }
-        busy = true;
-        render();
-        command("STATUS", null, result -> {
-            display(result);
-            busy = false;
-            render();
-            if (result == null || current == null || !current.canEnable || !validControlTicket()
-                    || !preference.available) return;
-            confirmChange(true, controlEpoch, controlBootSession);
-        });
-    }
-
-    private void confirmChange(boolean enable, long epoch, String bootSession) {
-        if (busy || confirmationVisible || destroyed) return;
-        confirmationVisible = true;
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle(enable ? R.string.dashboard_enable_title : R.string.dashboard_disable_title)
-                .setMessage(enable ? R.string.dashboard_enable_confirmation : R.string.dashboard_disable_confirmation)
-                .setNegativeButton(R.string.dashboard_cancel, null)
-                .setPositiveButton(R.string.dashboard_confirm, (d, which) -> {
-                    confirmationVisible = false;
-                    if (enable && (epoch != controlEpoch || !Objects.equals(bootSession, controlBootSession))) {
-                        showNotice(R.string.dashboard_session_changed);
-                        return;
-                    }
-                    persistAndApply(enable);
-                }).create();
-        dialog.setOnDismissListener(d -> confirmationVisible = false);
-        dialog.show();
-    }
-
-    private void persistAndApply(boolean enable) {
-        if (busy || destroyed) return;
-        boolean committed = CompatPreferenceStore.setEnabled(this, enable);
-        // 捕获同一保存后的意愿与revision，绝不在异步下发时借用较新的关闭revision去开启。
-        CompatPreferenceStore.State saved = CompatPreferenceStore.read(this);
-        DashboardState.Mutation mutation = DashboardState.afterPersistence(enable, committed,
-                saved.available, saved.enabled, saved.revision);
-        saveFailure = committed ? SAVE_OK : enable ? SAVE_ENABLE_FAILED : SAVE_DISABLE_FAILED;
-        if (mutation == DashboardState.Mutation.REJECT) {
-            saveFailure = SAVE_ENABLE_FAILED;
-            render();
-            return;
-        }
-        busy = true;
-        render();
-        long revision = DashboardState.commandRevision(enable, committed, saved.available, saved.revision);
-        command(mutation == DashboardState.Mutation.ENABLE ? "DAILY_ON" : "DAILY_OFF", saved, revision, result -> {
-            display(result);
-            busy = false;
-            render();
-        });
-    }
-
-    private boolean validControlTicket() {
-        return controlEpoch >= 0 && controlBootSession != null && !controlBootSession.isEmpty();
-    }
-
-    private void command(String cmd, CompatPreferenceStore.State saved, Reply reply) {
-        command(cmd, saved, saved == null ? -1 : saved.revision, reply);
-    }
-
-    private void command(String cmd, CompatPreferenceStore.State saved, long desiredRevision, Reply reply) {
-        if ("DAILY_ON".equals(cmd) && (saved == null || !saved.available || !saved.enabled
-                || saved.revision < 0 || desiredRevision != saved.revision)) {
-            responseIssue = "SETTING_UNCONFIRMED";
-            reply.accept(null);
-            return;
-        }
-        Intent intent = new Intent(ControlServer.ACTION).setPackage("android");
-        intent.putExtra("cmd", cmd);
-        if ("DAILY_ON".equals(cmd) || "DAILY_OFF".equals(cmd)) {
-            intent.putExtra("epoch", controlEpoch);
-            intent.putExtra("bootSession", controlBootSession);
-            intent.putExtra("desiredRevision", desiredRevision);
-        }
-        final boolean[] finished = {false};
-        Runnable timeout = () -> {
-            if (!finished[0] && !destroyed) {
-                finished[0] = true;
-                responseIssue = "NO_CONTROL_RESPONSE";
-                controlEpoch = -1;
-                controlBootSession = null;
-                reply.accept(null);
-            }
-        };
-        main.postDelayed(timeout, 8000);
+        final boolean[] finished={false};
+        Runnable timeout=()-> {if(!finished[0]&&!destroyed){finished[0]=true;callback.accept(new DesktopToggleController.Response(null,null,"NO_CONTROL_RESPONSE"));}};
+        main.postDelayed(timeout,8000);
         try {
-            sendOrderedBroadcast(intent, null, new BroadcastReceiver() {
-                @Override public void onReceive(Context context, Intent received) {
-                    if (finished[0] || destroyed) return;
-                    finished[0] = true;
-                    main.removeCallbacks(timeout);
-                    Bundle result = getResultExtras(false);
-                    if (result != null && result.containsKey("module")
-                            && !HomeScope.responseAllowed(result.getString("module"),
-                                    BuildConfig.VERSION_CODE, BuildConfig.VERSION_NAME)) {
-                        responseIssue = "MODULE_VERSION_MISMATCH";
-                        controlEpoch = -1;
-                        controlBootSession = null;
-                        reply.accept(null);
-                    } else if (result != null && result.containsKey("module")) {
-                        controlEpoch = result.getLong("epoch", -1);
-                        controlBootSession = result.getString("bootSession");
-                        responseIssue = null;
-                        reply.accept(result);
-                    } else {
-                        responseIssue = "NO_CONTROL_RESPONSE";
-                        controlEpoch = -1;
-                        controlBootSession = null;
-                        reply.accept(null);
+            sendOrderedBroadcast(intent,null,new BroadcastReceiver() {
+                @Override public void onReceive(Context context,Intent received) {
+                    if(finished[0]||destroyed)return;finished[0]=true;main.removeCallbacks(timeout);
+                    Bundle result=getResultExtras(false);
+                    if(result==null||!result.containsKey("module")){callback.accept(new DesktopToggleController.Response(null,null,"NO_CONTROL_RESPONSE"));return;}
+                    if(!HomeScope.responseAllowed(result.getString("module"),BuildConfig.VERSION_CODE,BuildConfig.VERSION_NAME)) {
+                        callback.accept(new DesktopToggleController.Response(null,null,"MODULE_VERSION_MISMATCH"));return;
                     }
+                    CompatPreferenceStore.State saved=home.saved();
+                    DashboardState actual=DashboardState.from(result.getString("contrast"),result.getString("hooks"),result.getString("bootstrap"),
+                        result.getString("coverage"),result.getString("error"),saved.available,saved.enabled);
+                    String error=result.getString("error");if("NONE".equals(error)||"".equals(error))error=null;
+                    callback.accept(new DesktopToggleController.Response(actual,new DesktopToggleController.Ticket(result.getLong("epoch",-1),result.getString("bootSession")),error));
                 }
-            }, main, 0, null, null);
-        } catch (RuntimeException ignored) {
-            finished[0] = true;
-            main.removeCallbacks(timeout);
-            responseIssue = "NO_CONTROL_RESPONSE";
-            controlEpoch = -1;
-            controlBootSession = null;
-            reply.accept(null);
+            },main,0,null,null);
+        } catch(RuntimeException unavailable) {
+            finished[0]=true;main.removeCallbacks(timeout);callback.accept(new DesktopToggleController.Response(null,null,"NO_CONTROL_RESPONSE"));
         }
     }
-
-    private void display(Bundle result) {
-        lastResponse = result == null ? null : new Bundle(result);
-        sampledAt = result == null ? null : DateFormat.getTimeInstance(DateFormat.SHORT).format(new Date());
-        render();
-    }
-
-    private void render() {
-        preference = CompatPreferenceStore.read(this);
-        current = lastResponse == null ? null : DashboardState.from(lastResponse.getString("contrast"),
-                lastResponse.getString("hooks"), lastResponse.getString("bootstrap"),
-                lastResponse.getString("coverage"), lastResponse.getString("error"),
-                preference.available, preference.enabled);
-        renderingSwitch = true;
-        enabledSwitch.setChecked(preference.available && preference.enabled);
-        renderingSwitch = false;
-        boolean mayTurnOff = preference.available && preference.enabled;
-        boolean mayTurnOn = preference.available && current != null && current.canEnable && validControlTicket();
-        enabledSwitch.setEnabled(!busy && (mayTurnOff || mayTurnOn));
-        enabledSwitch.setAlpha(enabledSwitch.isEnabled() ? 1f : .5f);
-        savedSetting.setText(preference.writeUnconfirmed ? R.string.dashboard_setting_unconfirmed
-                : saveFailure != SAVE_OK ? R.string.dashboard_setting_unsaved
-                : !preference.available ? R.string.dashboard_setting_unknown
-                : preference.enabled ? R.string.dashboard_setting_on : R.string.dashboard_setting_off);
-        enabledSwitch.setStateDescription(savedSetting.getText());
-        saveWarning.setVisibility(saveFailure != SAVE_OK || !preference.available ? View.VISIBLE : View.GONE);
-        saveWarning.setText(preference.writeUnconfirmed ? R.string.dashboard_save_unconfirmed
-                : saveFailure == SAVE_DISABLE_FAILED ? R.string.dashboard_save_off_failed
-                : saveFailure == SAVE_ENABLE_FAILED ? R.string.dashboard_save_on_failed
-                : R.string.dashboard_setting_read_failed);
-        applySetting.setVisibility(current != null && current.needsApply ? View.VISIBLE : View.GONE);
-        stopCurrent.setVisibility(current == null || !preference.available || saveFailure == SAVE_DISABLE_FAILED
-                || current.needsStop || current.kind == DashboardState.Kind.UNKNOWN
-                || current.kind == DashboardState.Kind.LOCKED || current.kind == DashboardState.Kind.HOOK_FAILURE
-                || current.kind == DashboardState.Kind.CONTROL_ERROR ? View.VISIBLE : View.GONE);
-        for (Button button : buttons) {
-            button.setEnabled(!busy);
-            button.setAlpha(busy ? .45f : 1f);
-        }
-        int title = R.string.dashboard_unchecked_title, body = R.string.dashboard_unchecked_body;
-        if (current == null) {
-            if ("MODULE_VERSION_MISMATCH".equals(responseIssue)) {
-                title = R.string.dashboard_mismatch_title;
-                body = R.string.dashboard_mismatch_body;
-            } else if (responseIssue != null) {
-                title = R.string.dashboard_unknown_title;
-                body = R.string.dashboard_unknown_body;
-            }
-        } else {
-            switch (current.kind) {
-                case READY -> {
-                    title = preference.available && preference.enabled ? R.string.dashboard_pending_title : R.string.dashboard_ready_title;
-                    body = preference.available && preference.enabled ? R.string.dashboard_pending_body : R.string.dashboard_ready_body;
-                }
-                case ACTIVE -> {
-                    title = R.string.dashboard_active_title;
-                    body = preference.available && !preference.enabled ? R.string.dashboard_still_active_body : R.string.dashboard_active_body;
-                }
-                case WAITING_TARGET -> { title = R.string.dashboard_waiting_title; body = R.string.dashboard_waiting_body; }
-                case RECOVERING -> { title = R.string.dashboard_recovering_title; body = R.string.dashboard_recovering_body; }
-                case LOCKED -> { title = R.string.dashboard_locked_title; body = R.string.dashboard_locked_body; }
-                case HOOK_FAILURE -> { title = R.string.dashboard_hook_failure_title; body = R.string.dashboard_hook_failure_body; }
-                case CONTROL_ERROR -> { title = R.string.dashboard_control_error_title; body = R.string.dashboard_control_error_body; }
-                default -> { title = R.string.dashboard_invalid_title; body = R.string.dashboard_invalid_body; }
-            }
-        }
-        CompatDashboardSummary summary = CompatDashboardSummary.from(
-                preference.available, preference.enabled, LockRelayService.isDesiredEnabled(this),
-                getString(title), getString(body), LockRelayService.status(this));
-        stateTitle.setText(summary.title);
-        stateBody.setText(summary.body);
-        boolean positive = !LockRelayService.isDesiredEnabled(this) && current != null && current.positive && saveFailure == SAVE_OK;
-        int textColor = color(positive ? R.color.dashboard_positive_text : R.color.dashboard_warning_text);
-        stateTitle.setTextColor(textColor);
-        stateBody.setTextColor(textColor);
-        sample.setTextColor(textColor);
-        ((TextView) stateCard.getChildAt(0)).setTextColor(textColor);
-        stateCard.setBackground(shape(color(positive ? R.color.dashboard_positive_surface : R.color.dashboard_warning_surface), 0, 24));
-        sample.setText(sampledAt == null ? getString(R.string.dashboard_sample_unknown)
-                : getString(R.string.dashboard_sample_hint, sampledAt));
-    }
-
     @SuppressWarnings("deprecation")
     private CompanionAppState refreshWallpaperApp() {
         CompanionAppState installed;
@@ -666,7 +390,9 @@ public final class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
-        if (wallpaperIdentity != null) refreshStatus();
+        refreshWallpaperApp();
+        renderOptions();
+        home.refresh();
         main.removeCallbacks(lockStatusRefresh);
         lockStatusRefresh.run();
     }
@@ -674,12 +400,9 @@ public final class MainActivity extends Activity {
         main.removeCallbacks(lockStatusRefresh);
         super.onPause();
     }
-    @Override protected void onSaveInstanceState(Bundle state) {
-        state.putInt("preferenceSaveFailure", saveFailure);
-        super.onSaveInstanceState(state);
-    }
     @Override protected void onDestroy() {
         destroyed = true;
+        home.close();
         updateExecutor.shutdownNow();
         main.removeCallbacksAndMessages(null);
         super.onDestroy();
